@@ -1,0 +1,53 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bbb281ee3bf0b054c82ac2347e9e782c, type: 3}
+  m_Name: Default Local Group
+  m_EditorClassIdentifier: 
+  m_GroupName: Default Local Group
+  m_Data:
+    m_SerializedData: []
+  m_GUID: 8e932af334e58374f9fc186e0868379b
+  m_SerializeEntries:
+  - m_GUID: d6bcf7f1532f0b14a8e93c848c261a81
+    m_Address: ganesh
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  - m_GUID: 7243acb607a39da43ae59e7cba1f236a
+    m_Address: hanuman
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  - m_GUID: c195f3d87449e5842be6cb297a69bc07
+    m_Address: matsya
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  - m_GUID: 4c6ed4b9930cc6840857c9f9d4816f94
+    m_Address: parasurama
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  - m_GUID: ed6a50c819c40f94087e202434844aca
+    m_Address: rama
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  - m_GUID: a720148ad6223454c90bb1729657d2e8
+    m_Address: vamana
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  - m_GUID: 7929d0806f06c244a8cbe13cb499e687
+    m_Address: vishnu
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  m_ReadOnly: 0
+  m_Settings: {fileID: 11400000, guid: 60a0635a1a7dea14786978e88a93261d, type: 2}
+  m_SchemaSet:
+    m_Schemas:
+    - {fileID: 11400000, guid: 7e9964fb8987d2c468ac81788da76546, type: 2}
+    - {fileID: 11400000, guid: ff3299d5969da7e459db190ceac9e453, type: 2}
