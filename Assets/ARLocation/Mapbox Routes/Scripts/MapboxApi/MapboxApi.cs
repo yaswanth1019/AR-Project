@@ -86,8 +86,6 @@ namespace ARLocation.MapboxRoutes
             return url;
         }
 
-
-
         string buildQueryRouteUrl(Location from, Location to, bool alternatives)
         {
             string url = "https://api.mapbox.com/directions/v5/mapbox/walking/";

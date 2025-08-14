@@ -1,5 +1,6 @@
 using UnityEngine;
 using TMPro;
+using System.Collections;
 
 namespace ARLocation.MapboxRoutes
 {
@@ -79,6 +80,31 @@ namespace ARLocation.MapboxRoutes
         }
 
         [System.Serializable]
+        public class VoiceSettingsData
+        {
+            [Tooltip("Enable voice instructions for navigation")]
+            public bool EnableVoiceInstructions = true;
+
+            [Tooltip("Distance at which to announce the next instruction")]
+            public float AnnouncementDistance = 50.0f;
+
+            [Tooltip("Distance at which to give immediate instruction (e.g., 'Turn right now')")]
+            public float ImmediateInstructionDistance = 10.0f;
+
+            [Tooltip("Minimum time between voice announcements to avoid spam")]
+            public float MinTimeBetweenAnnouncements = 5.0f;
+
+            [Tooltip("Announce distance updates periodically")]
+            public bool AnnounceDistanceUpdates = true;
+
+            [Tooltip("Interval for distance announcements (in seconds)")]
+            public float DistanceAnnouncementInterval = 30.0f;
+
+            [Tooltip("Distance intervals for announcements (e.g., every 100m, 50m, etc.)")]
+            public float[] DistanceThresholds = { 100f, 50f, 20f };
+        }
+
+        [System.Serializable]
         public class SettingsData
         {
             [Tooltip("The distance at which the target is deactivated and the next target is activated. Should be smaller than the sign-post FollowDistance and the direction arrow DropDistance.")]
@@ -98,7 +124,13 @@ namespace ARLocation.MapboxRoutes
         [Tooltip("Settings related to 3D model that appears on the end of the route, indicating to the user that he has arrived at his destination.")]
         public MapPinSettingsData FinishSignSettings;
 
+        [Tooltip("Settings related to voice instructions.")]
+        public VoiceSettingsData VoiceSettings;
+
         public SettingsData OtherSettings;
+
+        [Tooltip("Reference to the TTS Manager for voice instructions")]
+        public TTSManager ttsManager;
 
         // ================================================================================ //
         //  Private Classes                                                                 //
@@ -112,12 +144,33 @@ namespace ARLocation.MapboxRoutes
             public float Distance;
         }
 
+        [System.Serializable]
+        private class VoiceState
+        {
+            public float LastAnnouncementTime;
+            public float LastDistanceAnnouncementTime;
+            public bool HasAnnouncedInstruction;
+            public bool HasAnnouncedImmediate;
+            public string LastInstruction;
+            public float[] LastDistanceThresholds;
+
+            public VoiceState()
+            {
+                LastAnnouncementTime = -1f;
+                LastDistanceAnnouncementTime = -1f;
+                HasAnnouncedInstruction = false;
+                HasAnnouncedImmediate = false;
+                LastInstruction = "";
+            }
+        }
+
         // ================================================================================ //
         //  Private Fields                                                                  //
         // ================================================================================ //
 
         private InputData input = new InputData();
         private MachineState state = new MachineState { Type = StateType.Hidden, HasArrow = false };
+        private VoiceState voiceState = new VoiceState();
         private float arrowTime = 0;
         private float mapPinTime = 0;
 
@@ -140,6 +193,30 @@ namespace ARLocation.MapboxRoutes
         //  Monobehaviour Methods                                                           //
         // ================================================================================ //
 
+        void Start()
+        {
+            // Initialize TTS Manager if not assigned
+            if (ttsManager == null)
+            {
+                ttsManager = FindObjectOfType<TTSManager>();
+                if (ttsManager == null)
+                {
+                    GameObject ttsGO = new GameObject("TTSManager");
+                    ttsManager = ttsGO.AddComponent<TTSManager>();
+                }
+            }
+
+            // Initialize distance thresholds tracking
+            if (VoiceSettings.DistanceThresholds != null)
+            {
+                voiceState.LastDistanceThresholds = new float[VoiceSettings.DistanceThresholds.Length];
+                for (int i = 0; i < voiceState.LastDistanceThresholds.Length; i++)
+                {
+                    voiceState.LastDistanceThresholds[i] = float.MaxValue;
+                }
+            }
+        }
+
         void OnValidate()
         {
             if (L1 > L0)
@@ -160,12 +237,33 @@ namespace ARLocation.MapboxRoutes
         public override void Init(MapboxRoute route)
         {
             state = new MachineState { Type = StateType.Hidden, HasArrow = false };
+            voiceState = new VoiceState();
             gameObject.SetActive(false);
         }
 
-        public override void OffCurrentTarget(SignPostEventArgs args) {}
+        public override void OffCurrentTarget(SignPostEventArgs args) 
+        {
+            // Reset voice state when leaving a target
+            voiceState.HasAnnouncedInstruction = false;
+            voiceState.HasAnnouncedImmediate = false;
+        }
 
-        public override void OnCurrentTarget(SignPostEventArgs args) { }
+        public override void OnCurrentTarget(SignPostEventArgs args) 
+        {
+            // Reset voice state when entering a new target
+            voiceState.HasAnnouncedInstruction = false;
+            voiceState.HasAnnouncedImmediate = false;
+            voiceState.LastInstruction = "";
+
+            // Reset distance thresholds
+            if (voiceState.LastDistanceThresholds != null)
+            {
+                for (int i = 0; i < voiceState.LastDistanceThresholds.Length; i++)
+                {
+                    voiceState.LastDistanceThresholds[i] = float.MaxValue;
+                }
+            }
+        }
 
         public override bool UpdateSignPost(SignPostEventArgs args)
         {
@@ -175,6 +273,12 @@ namespace ARLocation.MapboxRoutes
 
             var result = step();
             update(args);
+            
+            // Handle voice instructions
+            if (VoiceSettings.EnableVoiceInstructions && input.IsCurrentTarget)
+            {
+                HandleVoiceInstructions(args);
+            }
 
             return result;
         }
@@ -182,6 +286,111 @@ namespace ARLocation.MapboxRoutes
         // ================================================================================ //
         //  Private Methods                                                                 //
         // ================================================================================ //
+
+        private void HandleVoiceInstructions(SignPostEventArgs args)
+        {
+            float currentTime = Time.time;
+            float timeSinceLastAnnouncement = currentTime - voiceState.LastAnnouncementTime;
+
+            // Avoid spam announcements
+            if (timeSinceLastAnnouncement < VoiceSettings.MinTimeBetweenAnnouncements)
+                return;
+
+            string instruction = args.Instruction;
+            if (string.IsNullOrEmpty(instruction))
+                return;
+
+            // Announce instruction at specified distance
+            if (!voiceState.HasAnnouncedInstruction && 
+                input.Distance <= VoiceSettings.AnnouncementDistance && 
+                input.Distance > VoiceSettings.ImmediateInstructionDistance)
+            {
+                string announcement = $"In {Mathf.RoundToInt(input.Distance)} meters, {instruction}";
+                StartCoroutine(SpeakInstruction(announcement));
+                voiceState.HasAnnouncedInstruction = true;
+                voiceState.LastInstruction = instruction;
+            }
+            // Immediate instruction
+            else if (!voiceState.HasAnnouncedImmediate && 
+                     input.Distance <= VoiceSettings.ImmediateInstructionDistance)
+            {
+                string announcement = input.IsLast ? "You have arrived at your destination" : instruction;
+                StartCoroutine(SpeakInstruction(announcement));
+                voiceState.HasAnnouncedImmediate = true;
+            }
+
+            // Distance threshold announcements
+            HandleDistanceThresholds(args);
+
+            // Periodic distance updates
+            HandlePeriodicDistanceUpdates(args);
+        }
+
+        private void HandleDistanceThresholds(SignPostEventArgs args)
+        {
+            if (VoiceSettings.DistanceThresholds == null || voiceState.LastDistanceThresholds == null)
+                return;
+
+            for (int i = 0; i < VoiceSettings.DistanceThresholds.Length; i++)
+            {
+                float threshold = VoiceSettings.DistanceThresholds[i];
+                
+                if (input.Distance <= threshold && voiceState.LastDistanceThresholds[i] > threshold)
+                {
+                    string announcement = $"{Mathf.RoundToInt(input.Distance)} meters remaining";
+                    StartCoroutine(SpeakInstruction(announcement));
+                    voiceState.LastDistanceThresholds[i] = input.Distance;
+                    break; // Only announce one threshold at a time
+                }
+            }
+        }
+
+        private void HandlePeriodicDistanceUpdates(SignPostEventArgs args)
+        {
+            if (!VoiceSettings.AnnounceDistanceUpdates)
+                return;
+
+            float currentTime = Time.time;
+            float timeSinceLastDistanceUpdate = currentTime - voiceState.LastDistanceAnnouncementTime;
+
+            if (timeSinceLastDistanceUpdate >= VoiceSettings.DistanceAnnouncementInterval)
+            {
+                if (input.Distance > VoiceSettings.ImmediateInstructionDistance)
+                {
+                    string announcement = $"Continue for {Mathf.RoundToInt(input.Distance)} meters";
+                    StartCoroutine(SpeakInstruction(announcement));
+                    voiceState.LastDistanceAnnouncementTime = currentTime;
+                }
+            }
+        }
+
+        private IEnumerator SpeakInstruction(string text)
+        {
+            if (ttsManager != null)
+            {
+                voiceState.LastAnnouncementTime = Time.time;
+                yield return StartCoroutine(ttsManager.Speak(text));
+                Debug.Log($"Voice Instruction: {text}");
+            }
+        }
+
+        // Add method to manually trigger voice instruction (useful for testing or manual control)
+        public void SpeakCustomInstruction(string instruction)
+        {
+            if (VoiceSettings.EnableVoiceInstructions)
+            {
+                StartCoroutine(SpeakInstruction(instruction));
+            }
+        }
+
+        // Method to toggle voice instructions on/off
+        public void ToggleVoiceInstructions()
+        {
+            VoiceSettings.EnableVoiceInstructions = !VoiceSettings.EnableVoiceInstructions;
+            
+            string status = VoiceSettings.EnableVoiceInstructions ? "enabled" : "disabled";
+            StartCoroutine(SpeakInstruction($"Voice instructions {status}"));
+        }
 
         private bool step()
         {
@@ -228,7 +437,7 @@ namespace ARLocation.MapboxRoutes
             var ArrowContainer = DirectionArrowSettings.Container;
             var MapPinContainer = FinishSignSettings.Container;
 
-            // Hidden -> Not Hiddeen transitions
+            // Hidden -> Not Hidden transitions
             if (state.Type == StateType.Hidden && next.Type != StateType.Hidden)
             {
                 gameObject.SetActive(true);
@@ -389,7 +598,6 @@ namespace ARLocation.MapboxRoutes
             }
             else
             {
-
                 float t = time - DropDuration;
 
                 // Add a "wavy" floating movement
@@ -402,4 +610,3 @@ namespace ARLocation.MapboxRoutes
         }
     }
 }
-
